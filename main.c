@@ -14,7 +14,7 @@
         abort ();                                                                                                      \
     }
 
-#define DA_INITIAL_CAP 256
+#define DA_INITIAL_CAP 32
 
 #define DA(T)                                                                                                          \
     struct                                                                                                             \
@@ -80,15 +80,48 @@ query_free (struct query q)
     DA_FREE (&q.values);
 }
 
+void
+mod_bold (void)
+{
+    printf ("\e[1m");
+    fflush (stdout);
+}
+
+void
+mod_inverted (void)
+{
+    printf ("\e[7m");
+    fflush (stdout);
+}
+
+void
+mod_reset (void)
+{
+    printf ("\e[0m");
+    fflush (stdout);
+}
+
+void
+fg_reset (void)
+{
+    printf ("\e[39m");
+    fflush (stdout);
+}
+
 bool
 query_ask (struct query q)
 {
-    printf (">> %s\n", q.key.items);
-
+    mod_bold ();
+    printf (">> ");
+    printf ("%s\n", q.key.items);
     printf ("<< ");
-    fflush (stdout);
-    char input[25];
+
+    mod_reset ();
+
+    mod_inverted ();
+    char input[25] = { 0 };
     scanf ("%24s", input);
+    mod_reset ();
 
     bool correct = false;
     for (unsigned i = 0; i < q.values.len; ++i)
@@ -99,6 +132,25 @@ query_ask (struct query q)
             break;
         }
     }
+
+    printf ("\e[1A"); // move up
+
+    if (correct)
+        printf ("\e[38;5;82m"); // green
+    else
+        printf ("\e[38;5;124m"); // red
+
+    printf (">> %s\n", input);
+
+    if (!correct)
+    {
+        printf ("\e[38;5;93m"); // yellow
+        printf ("[ ");
+        for (unsigned i = 0; i < q.values.len; ++i) printf ("%s ", q.values.items[i].items);
+        printf ("]\n");
+    }
+
+    fg_reset ();
 
     return correct;
 }
@@ -334,7 +386,7 @@ gamedata_parse_row (token_array tokens, unsigned *i, query_array *out_queries) /
 }
 
 bool
-gamedata_parse (token_array tokens, query_array *out_queries)
+gamedata_parse (token_array tokens, query_array *out_queries) // [row]*
 {
     unsigned i = 0;
 
