@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define ERROR(msg) fprintf (stderr, "Error: %s\n", msg)
 #define FERROR(fmt, ...) fprintf (stderr, "Error: " fmt "\n", __VA_ARGS__)
@@ -51,12 +52,19 @@
     } while (0)
 
 #define DA_FREE(da)                                                                                                    \
-    if ((da)->items) free ((da)->items);
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if ((da)->items) free ((da)->items);                                                                           \
+        (da)->items = NULL;                                                                                            \
+        (da)->cap = 0;                                                                                                 \
+        (da)->len = 0;                                                                                                 \
+    } while (0)
 
 typedef DA (char) string;
 typedef DA (string) string_array;
 
 enum gamemode mode;
+bool use_colors = true;
 
 struct query
 {
@@ -83,6 +91,7 @@ query_free (struct query q)
 void
 mod_bold (void)
 {
+    if (!use_colors) return;
     printf ("\e[1m");
     fflush (stdout);
 }
@@ -90,6 +99,7 @@ mod_bold (void)
 void
 mod_inverted (void)
 {
+    if (!use_colors) return;
     printf ("\e[7m");
     fflush (stdout);
 }
@@ -97,14 +107,32 @@ mod_inverted (void)
 void
 mod_reset (void)
 {
+    if (!use_colors) return;
     printf ("\e[0m");
+    fflush (stdout);
+}
+
+void
+fg_set (int color)
+{
+    if (!use_colors) return;
+    printf ("\e[38;5;%dm", color);
     fflush (stdout);
 }
 
 void
 fg_reset (void)
 {
+    if (!use_colors) return;
     printf ("\e[39m");
+    fflush (stdout);
+}
+
+void
+cursor_up (int lines)
+{
+    if (!use_colors) return;
+    printf ("\e[%dA", lines); // move up
     fflush (stdout);
 }
 
@@ -115,42 +143,53 @@ query_ask (struct query q)
     printf (">> ");
     printf ("%s\n", q.key.items);
     printf ("<< ");
-
     mod_reset ();
 
     mod_inverted ();
-    char input[25] = { 0 };
-    scanf ("%24s", input);
+    char inputbuf[256];
+    if (!fgets (inputbuf, sizeof inputbuf, stdin)) return false;
+    size_t L = strlen (inputbuf);
+    if (L && inputbuf[L - 1] == '\n') inputbuf[L - 1] = '\0';
     mod_reset ();
 
     bool correct = false;
     for (unsigned i = 0; i < q.values.len; ++i)
     {
-        if (strcasecmp (input, q.values.items[i].items) == 0)
+        if (strcasecmp (inputbuf, q.values.items[i].items) == 0)
         {
             correct = true;
             break;
         }
     }
 
-    printf ("\e[1A"); // move up
-
-    if (correct)
-        printf ("\e[38;5;82m"); // green
-    else
-        printf ("\e[38;5;124m"); // red
-
-    printf (">> %s\n", input);
-
-    if (!correct)
+    if (use_colors)
     {
-        printf ("\e[38;5;93m"); // yellow
-        printf ("[ ");
-        for (unsigned i = 0; i < q.values.len; ++i) printf ("%s ", q.values.items[i].items);
-        printf ("]\n");
-    }
+        cursor_up (1);
 
-    fg_reset ();
+        if (correct)
+            fg_set (82);
+        else
+            fg_set (124);
+
+        printf (">> %s\n", inputbuf);
+
+        if (!correct)
+        {
+            fg_set (93);
+            printf ("[ ");
+            for (unsigned i = 0; i < q.values.len; ++i) printf ("%s ", q.values.items[i].items);
+            printf ("]\n");
+        }
+
+        fg_reset ();
+    }
+    else
+    {
+        if (correct)
+            printf ("CORRECT\n");
+        else
+            printf ("INCORRECT");
+    }
 
     return correct;
 }
@@ -458,11 +497,16 @@ print_usage (const char *progname)
         printf ("\t%-25s - %s\n", gamemode_description[i].name, gamemode_description[i].description);
     printf ("OPTIONS:\n");
     printf ("\t-n UINT - specify number of questions you want to be asked\n");
+    printf ("\t-p      - plain mode - disable color output and fancy text formatting using escape codes\n");
+    printf ("\t-s UINT - specify seed for srand()\n");
 }
 
 int
 main (int argc, char *argv[])
 {
+    if (!isatty (fileno (stdout))) use_colors = false;
+    srand (time (NULL));
+
     if (argc == 1)
     {
         print_usage (argv[0]);
@@ -485,16 +529,16 @@ main (int argc, char *argv[])
     int n_queries = -1;
     int opt;
 
-    while ((opt = getopt (argc - 1, argv + 1, "n:")) != -1)
+    while ((opt = getopt (argc - 1, argv + 1, "n:ps:")) != -1)
     {
         switch (opt)
         {
         case 'n': n_queries = atoi (optarg); break;
+        case 'p': use_colors = false; break;
+        case 's': srand (atoi (optarg)); break;
         default: /* '?' */ print_usage (argv[0]); return 1;
         }
     }
-
-    srand (time (NULL));
 
     query_array queries = { 0 };
     if (!gamemode_load (&queries)) { return 1; }
